@@ -414,7 +414,7 @@ async def run_asyncio_tasks(ds4_tester):
             print("Firefox browser launched.")
             page = await browser.new_page()
             await page.goto(
-                "https://peer.madiator.cloud/p/livechat/room?room=b2db21c7-04da-4c16-8cb0-bcf3f967066a",
+                "https://peertube.chat/here",
                 timeout=60000)
             print("Page loaded.")
             await page.wait_for_selector('.message', timeout=60000)
