@@ -7,14 +7,29 @@ import hashlib
 import asyncio
 from typing import Dict, Union, List
 from playwright.async_api import async_playwright, TimeoutError
+import os
 
+chatroom_url = "PUT.CHATROOM/URL_HERE"
 stop_event = threading.Event()
+
+
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
 
 
 class DS4Tester:
     def __init__(self):
         self.gamepad = vg.VDS4Gamepad()
         self._initialize_mappings()
+        self.ps_button_thread = threading.Thread(target=self._press_ps_periodically, daemon=True)
+        self.ps_button_thread.start()
+
+    def _press_ps_periodically(self):
+        """Presses the PS button every 30 minutes. for save states"""
+        while True:
+            time.sleep(1800)  # Wait for 30 minutes
+            #print("Pressing PS button to prevent idle timeout.")
+            self._handle_special_button("ps")
 
     def _initialize_mappings(self):
         """Initialize all controller mappings"""
@@ -126,11 +141,11 @@ class DS4Tester:
             print(f"Unrecognized input '{input_name}'. No button pressed.")
             self.reset_all()  # Turn off all button presses for invalid input
 
-        time.sleep(0.07)  # Brief pause between inputs
+        time.sleep(0.04)  # Brief pause between inputs
 
     def _press_multiple_inputs(self, input_names: List[str], duration: float) -> None:
         """Handle simultaneous button presses more robustly."""
-        print(f"Pressing simultaneously: {', '.join(i.upper() for i in input_names)}")
+        #print(f"Pressing simultaneously: {', '.join(i.upper() for i in input_names)}")
         dpad_directions = []
 
         # Press buttons and collect D-pad directions
@@ -166,7 +181,7 @@ class DS4Tester:
                 self.gamepad.release_special_button(self.special_button_mapping[input_name])
 
         self.gamepad.update()
-        time.sleep(0.07)  # Brief pause after release
+        time.sleep(0.04)  # Brief pause after release
 
     def _handle_button(self, button: str, duration: float) -> None:
         """Handle regular button press/release."""
@@ -221,24 +236,6 @@ class DS4Tester:
             print("\nTest sequence terminated by user")
 
 
-async def get_latest_message_from_chat(page):
-    """Get the latest message from the chat using Playwright."""
-    await page.wait_for_selector('.message', state='attached')
-    message_element = page.locator('.message').last
-    return await message_element.text_content()
-
-
-async def get_last_5_messages_from_chat(page):
-    """Get the last 5 messages from the chat using Playwright."""
-    await page.wait_for_selector('.message', state='attached')
-    message_elements = page.locator('.message')
-    count = await message_elements.count()
-
-    messages = []
-    for i in range(max(0, count - 5), count):
-        element = message_elements.nth(i)
-        messages.append(await element.text_content())
-    return messages
 
 async def get_last_10_messages_from_chat(page):
     """Get the last 5 messages from the chat using Playwright."""
@@ -247,7 +244,7 @@ async def get_last_10_messages_from_chat(page):
     count = await message_elements.count()
 
     messages = []
-    for i in range(max(0, count - 10), count):
+    for i in range(max(0, count - 15), count):
         element = message_elements.nth(i)
         messages.append(await element.text_content())
     return messages
@@ -283,17 +280,6 @@ def extract_timestamp(message_array):
     
     return timestamps
 
-def merge_lists_with_overlap(list1, list2):
-    """
-    Merge two lists by identifying overlapping elements at the end of list1 and start of list2.
-    """
-    max_overlap = min(len(list1), len(list2))  # Limit overlap check to shortest list
-
-    for i in range(max_overlap, 0, -1):
-        if list1[-i:] == list2[:i]:  # Check for overlap
-            return list1 + list2[i:]  # Merge without duplicate overlap
-
-    return list1 + list2  # Default to concatenation if no overlap found
 def remove_overlap(previous_cycle, this_cycle):
     """
     Removes the overlapping part of this_cycle with previous_cycle.
@@ -304,11 +290,11 @@ def remove_overlap(previous_cycle, this_cycle):
     """
     max_overlap = min(len(previous_cycle), len(this_cycle))  # Limit overlap check
 
-    for i in range(max_overlap, 0, -1):
-        if previous_cycle[-i:] == this_cycle[:i]:  # Check for overlap
-            return this_cycle[i:]  # Remove the overlapping part
-
-    return this_cycle  # If no overlap, return the original list
+    max_overlap = min(len(previous_cycle), len(this_cycle))  
+    for i in range(max_overlap, 0, -1):  
+        if previous_cycle[-i:] == this_cycle[:i]:  
+            return this_cycle[i:]  
+    return this_cycle  
 
 
 
@@ -318,41 +304,34 @@ async def check_chat_messages(page, stop_event, ds4_tester):
     username_map = {}
     #previous_last_5_message_content = await get_last_5_messages_from_chat(page)  # gets the last 5 messages
     previous_cycle_last_10_messages_from_chat = await get_last_10_messages_from_chat(page)
+    counter = 10
 
-    Already_executed_commands = previous_cycle_last_10_messages_from_chat
+    #Already_executed_commands = previous_cycle_last_10_messages_from_chat
     while not stop_event.is_set():
         try:
             #last_5_message_content = await get_last_5_messages_from_chat(page)            
             this_cycle_last_10_messages_from_chat = await get_last_10_messages_from_chat(page)
             
-            if this_cycle_last_10_messages_from_chat == previous_cycle_last_10_messages_from_chat: #extract_messages_regex(this_cycle_last_10_messages_from_chat) == extract_messages_regex(previous_cycle_last_10_messages_from_chat):
+            if counter == 10 and this_cycle_last_10_messages_from_chat == previous_cycle_last_10_messages_from_chat: #extract_messages_regex(this_cycle_last_10_messages_from_chat) == extract_messages_regex(previous_cycle_last_10_messages_from_chat):
                 await asyncio.sleep(2)
                 continue
-
-            #this_cycles_existing_5_message = extract_messages_regex(last_5_message_content)
-            #message merging: finds the overlap between last cycle's and this cycle's messages
-            #common_elements = list(set(previous_cycle_last_10_messages_from_chat) & set(this_cycle_last_10_messages_from_chat))
-            #filtered = [x for x in previous_cycle_last_10_messages_from_chat if x not in common_elements]
-            timelime_of_inputs_left_is_oldest = merge_lists_with_overlap(previous_cycle_last_10_messages_from_chat, this_cycle_last_10_messages_from_chat)#filtered + this_cycle_last_10_messages_from_chat
-            filtered_this_cycle = remove_overlap(previous_cycle_last_10_messages_from_chat, this_cycle_last_10_messages_from_chat)
-            Commands_to_execute_raw = filtered_this_cycle
-            #common_elements1 = list(set(timelime_of_inputs_left_is_oldest) & set(Already_executed_commands))
-            #Commands_to_execute_raw = list(set(timelime_of_inputs_left_is_oldest) & set(Already_executed_commands))
-            #Commands_to_execute_raw = [x for x in timelime_of_inputs_left_is_oldest if x not in common_elements1]
+            if counter == 10:
+                counter = 0
+            counter = counter + 1
             
-            #timelime_of_inputs_left_is_oldest = filtered + this_cycle_last_10_messages_from_chat
-            Commands_to_execute_messages_test = extract_messages_regex(Commands_to_execute_raw)
-            #print(f"timelime_of_inputs_left_is_oldest:{timelime_of_inputs_left_is_oldest}")
+            Commands_to_execute_raw = remove_overlap(previous_cycle_last_10_messages_from_chat, this_cycle_last_10_messages_from_chat)
+            previous_cycle_last_10_messages_from_chat = this_cycle_last_10_messages_from_chat
             
-            #print(f"common_elements1:{common_elements1}")
-            #print(f"Commands_to_execute_raw:{Commands_to_execute_raw}")
-            #print(f"this_cycles_existing_5_message[-1]:{this_cycles_existing_5_message[-1]}")
-           
+            if len(Commands_to_execute_raw) == 15:
+                print('remove_overlap glitch implimenting failsafe')
+                Commands_to_execute_raw = Commands_to_execute_raw[-1]
+            
+            #previous_cycle_last_10_messages_from_chat = this_cycle_last_10_messages_from_chat
             for raw_command in Commands_to_execute_raw:
                 Commands_to_execute_raw1 = [raw_command]
                 #print(f"Commands_to_execute_raw:{Commands_to_execute_raw1}")
                 Commands_to_execute_messages = extract_messages_regex(Commands_to_execute_raw1)
-                print(f"Commands_to_execute_messages:{Commands_to_execute_messages}")
+                #print(f"Commands_to_execute_messages:{Commands_to_execute_messages}")
                 Commands_to_execute_Username = extract_sender(Commands_to_execute_raw1)                    
                 if isinstance(Commands_to_execute_messages, list):
                     tokens = " ".join(Commands_to_execute_messages).split()
@@ -361,8 +340,11 @@ async def check_chat_messages(page, stop_event, ds4_tester):
 
                 base_command = tokens[0] if tokens else ""
                 repetitions = 1
-                if len(tokens) > 1 and tokens[1].isdigit():
-                    repetitions = int(tokens[1])
+                if len(tokens) > 1 and tokens[-1].isdigit():
+                    repetitions = int(tokens[-1])
+                    tokens.pop()
+                    if repetitions > 15:
+                        repetitions = 15
                 # Use tokens up to the word "Copy" if present.
                 if "Copy" in tokens:
                     message_tokens = tokens[:tokens.index('Copy')]
@@ -371,38 +353,32 @@ async def check_chat_messages(page, stop_event, ds4_tester):
                 #print(f"message_tokens:{message_tokens}")
                 base_command1 = base_command
                 base_command = base_command.lower()
-                normalized_command = f"{base_command}*{repetitions}" if repetitions > 1 else base_command
-                #this_cycles_last_5_usernames = extract_sender(last_5_message_content)
-                #this_cycles_lst_5_time_stamps = extract_timestamp(last_5_message_content)
 
-            
-                print(f"Decision: Command '{normalized_command}' triggered based on message: {base_command1}")
                 if Commands_to_execute_Username:
-                    print(f"Username: {Commands_to_execute_Username}")
+                    print(f"Username: {Commands_to_execute_Username[0]}")
                 #if this_cycles_lst_5_time_stamps:
                 #    print(f"Timestamp: {this_cycles_lst_5_time_stamps[-1]}")
-                print(f"Command: {Commands_to_execute_messages}")
-                
+                if repetitions == 1:
+                    print(f"Executing {message_tokens[0]}")
+                else:
+                    print(f"Executing {message_tokens[0]} {repetitions} time")
                 # Wrap press_input in a try/except to handle invalid token errors.
-                previous_cycle_last_10_messages_from_chat = this_cycle_last_10_messages_from_chat
                 try:
-                    #ds4_tester.press_input(Commands_to_execute_messages)
                     ds4_tester.press_input(message_tokens)
+                    for i in range(repetitions-1):
+                        ds4_tester.press_input(message_tokens)
                     print("---")
                 except ValueError as ve:
                     #print(f"Invalid command encountered: {ve}. Turning off all button presses.")
                     ds4_tester.reset_all()
             
-            #Already_executed_commands = Already_executed_commands + Commands_to_execute_raw
-            #Already_executed_commands = Already_executed_commands[-15:]
-            #print(f"update Already_executed_commands: {Already_executed_commands}")
-
+            
         except Exception as e:
             print(f"Error processing message: {e}")
             await page.reload()
             print("Page refreshed.")
-        #previous_last_5_message_content = last_5_message_content
-        await asyncio.sleep(1)
+                
+        #await asyncio.sleep(1)
 
 
 async def run_asyncio_tasks(ds4_tester):
@@ -410,15 +386,14 @@ async def run_asyncio_tasks(ds4_tester):
     async with async_playwright() as p:
         browser = None
         try:
-            browser = await p.firefox.launch(headless=False)
+            browser = await p.firefox.launch(headless=True)
             print("Firefox browser launched.")
             page = await browser.new_page()
-            await page.goto(
-                "https://peertube.chat/here",
-                timeout=60000)
+            await page.goto(chatroom_url,timeout=60000)
             print("Page loaded.")
             await page.wait_for_selector('.message', timeout=60000)
             print("First message detected, starting the chat checking thread...")
+            #clear_screen()
             chat_task = asyncio.create_task(check_chat_messages(page, stop_event, ds4_tester))
             await chat_task
 
@@ -438,7 +413,6 @@ async def run_asyncio_tasks(ds4_tester):
 
 def main():
     tester = DS4Tester()
-    #tester.press_input(['x', 'o'])
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     stop_event = threading.Event()
@@ -446,6 +420,5 @@ def main():
 
 
 if __name__ == "__main__":
-    key_mappings = {"a": "cross", "b": "circle", "up": "north", "down": "south", "left": "west", "right": "east",
-                    "start": "options", "select": "share"}
+    
     main()
